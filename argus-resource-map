@@ -3,12 +3,13 @@
 # ARGUS resource allocation map.
 
 # Made by Diamantino Silva
-# 2017-03-20
+# 2017-04-17
 
-# Version 1
+# Version 1.1
 # Whats new:
 # - '-u' option to only show some users
 # - Fixed get_users(), using a dictionary instead of a list
+# - Bugs corrected
 
 
 
@@ -19,23 +20,21 @@ import subprocess
 
 
 def print_usage():
-	print()
-	print("usage:")
-	print(sys.argv[0], "[-u user0, user1, ...]")
-	print()
-
+	print
+	print "usage:"
+	print sys.argv[0], "[-u user0, user1, ...]"
+	print
 
 
 
 
 def parse_argv_users(l_args):
-	d_users = {}
+	l_users = []
 	for arg in l_args:
 		if arg[0] == "-":
 			break
-		d_users[arg] = 1
-	users = list(d_users.keys())
-	return users
+		l_users += [arg]
+	return l_users
 
 
 
@@ -54,20 +53,28 @@ def parse_argv():
 	while c < argc:
 		arg = sys.argv[c]
 		if arg not in arg_opt:
-			print("Argument", arg, "not valid.")
+			print "Argument", arg, "not valid."
 			print_usage()
 			exit(1)
 		if arg_opt[arg] == 1:
-			print("Repeated argument", arg)
+			print "Repeated argument", arg
 			print_usage()
 			exit(1)
 		
 		# Processing for each option
 		if arg == '-u':
 			arg_opt[arg] = True
-			l_some_users = parse_argv_users(sys_argv[c+1:])
+			l_some_users = parse_argv_users(sys.argv[c+1:])
 			f_some_users = len(l_some_users) != 0
+			
+			if not f_some_users:
+				print "ERROR: user names not specified"
+				exit(1)
+
 			c += len(l_some_users)
+
+			# limpeza de users repetidos
+			l_some_users = list(set(l_some_users))
 
 		c += 1
 
@@ -219,7 +226,7 @@ def get_running_jobs():
 		
 		# User filtering
 		if f_some_users:
-			if job_info[0] not in l_some_users:
+			if job_info[0][0] not in l_some_users:
 				continue
 		
 		l_jobs += job_info
@@ -288,11 +295,12 @@ def filter_blades(jobs, blades_info):
 	for j in jobs:
 		d_blades[j[1]] = 1
 	
+	
 	new_blades_info = []
-	for b in blades_info:
-		if b not in d_blades:
+	for i in range(len(blades_info)):
+		if i not in d_blades:
 			continue
-		new_blades_info.append(b)
+		new_blades_info.append(blades_info[i])
 	
 	return new_blades_info
 
@@ -309,7 +317,10 @@ def print_blades_ocupation(blades_info, jobs, u_chars):
 	global disp_buff
 
 	N = len(blades_info)
-	
+
+	# Blades activas
+	active_blades = [False]*N
+
 	# Quantidade de memoria por bloco
 	dm = max_mem/n_cols_mem_max
 
@@ -328,6 +339,8 @@ def print_blades_ocupation(blades_info, jobs, u_chars):
 		uc = u_chars[user]
 		# a numeracao das blades comeca em 1
 		i_blade = int(j[1]) - 1
+
+		active_blades[i_blade] = True
 		
 		# Ocupacao dos cpus da blade
 		for c in j[2]:
@@ -360,6 +373,12 @@ def print_blades_ocupation(blades_info, jobs, u_chars):
 		
 	# Construccao de cada linha e print 
 	for i in range(N):
+		
+		# Caso se esteja a filtrar os users, censuram-se as blades que
+		# nao tenham jobs activos
+		if f_some_users and (not active_blades[i]):
+			continue
+
 		n_cpus_blade = blades_info[i][1]
 		str_blade_tmp = ""
 		for c in blades[i]:
@@ -493,7 +512,7 @@ l_some_users = []
 
 parse_argv()
 
-exit(2)
+
 
 
 # Caracteristicas do terminal
@@ -545,16 +564,15 @@ n_cols_mem_max = n_cols_term - n_cols_base
 # Formatacao: [user, blade, processador, memoria]
 jobs = get_running_jobs()
 
+if len(jobs) == 0:
+	print("ERROR: no jobs found")
+	exit(2)
+
 # Dicionario dos characteres de cada user
 # Decidi usar uma hash para determinar a cor de cada user.
 users = get_users(jobs)
 u_chars = make_user_char_dic(users)
 
-
-
-# Quando temos uma lista de users, filtram-se as blades
-if f_some_users:
-	blades_info = filter_blades(jobs, blades_info)
 
 
 
