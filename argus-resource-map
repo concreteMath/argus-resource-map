@@ -1,0 +1,576 @@
+#!/usr/bin/python
+
+# ARGUS resource allocation map.
+
+# Made by Diamantino Silva
+# 2017-03-20
+
+# Version 1
+# Whats new:
+# - '-u' option to only show some users
+# - Fixed get_users(), using a dictionary instead of a list
+
+
+
+import sys
+import subprocess
+
+
+
+
+def print_usage():
+	print()
+	print("usage:")
+	print(sys.argv[0], "[-u user0, user1, ...]")
+	print()
+
+
+
+
+
+def parse_argv_users(l_args):
+	d_users = {}
+	for arg in l_args:
+		if arg[0] == "-":
+			break
+		d_users[arg] = 1
+	users = list(d_users.keys())
+	return users
+
+
+
+
+def parse_argv():
+	global f_some_users
+	global l_some_users
+
+	# arg_opt:
+	# False -> not found
+	# True  -> already found
+	arg_opt = {"-u": False}
+	
+	c = 1
+	argc = len(sys.argv)
+	while c < argc:
+		arg = sys.argv[c]
+		if arg not in arg_opt:
+			print("Argument", arg, "not valid.")
+			print_usage()
+			exit(1)
+		if arg_opt[arg] == 1:
+			print("Repeated argument", arg)
+			print_usage()
+			exit(1)
+		
+		# Processing for each option
+		if arg == '-u':
+			arg_opt[arg] = True
+			l_some_users = parse_argv_users(sys_argv[c+1:])
+			f_some_users = len(l_some_users) != 0
+			c += len(l_some_users)
+
+		c += 1
+
+
+
+
+
+# Informacao sobre as medidas do terminal
+def get_term_width():
+	p = subprocess.Popen(["stty","size"], stdout=subprocess.PIPE)
+	out, err = p.communicate()
+	raw = out.decode().split()
+	medidas = [int(x) for x in raw]
+	
+	return medidas[1]
+
+
+
+
+# Informacao sobre as blades
+def get_blades_info():
+	global max_name_len
+	global max_cpus
+	global max_mem
+	
+	max_name_len = 0
+	max_cpus = 0
+	max_mem = 0
+	
+	# Obtencao da informacao sobre as blades
+	p = subprocess.Popen(['sinfo', '-h', '-N', '-O',
+		'nodehost,cpusstate,memory,allocmem'], stdout=subprocess.PIPE,
+		stderr=subprocess.PIPE)
+	out, err = p.communicate()
+	lines = out.split("\n")[:-1]
+	
+	blades_info = []
+
+	for l in lines:
+		l_tmp = l.split()
+		cpus_info = l_tmp[1].split('/')
+		bl_name = l_tmp[0]
+		bl_total_cpus = int(cpus_info[3])
+		bl_other_cpus = int(cpus_info[2])
+		bl_total_mem = int(l_tmp[2])
+		bl_alloc_mem = int(l_tmp[3])
+		
+		if len(bl_name) > max_name_len:
+			max_name_len = len(bl_name)
+		if bl_total_cpus > max_cpus:
+			max_cpus = bl_total_cpus
+		if bl_total_mem > max_mem:
+			max_mem = bl_total_mem
+
+		blades_info += [[bl_name, bl_total_cpus, bl_other_cpus, bl_total_mem,\
+			bl_alloc_mem]]
+
+	return blades_info
+
+
+
+
+# Conversao de ranges fragmentados para uma lista de numeros.
+def make_interval(txt):
+	l_num_raw = txt.split(',')
+	l_num_out = []
+	for num in l_num_raw:
+		if "-" in num:
+			i_num = num.split("-")
+			i0 = int(i_num[0])
+			i1 = int(i_num[1])
+			l_num_out += list(range(i0 ,i1 + 1))
+		else:
+			l_num_out += [int(num)]
+
+	return l_num_out
+
+
+
+
+def get_node_info(line):
+	# Transformacao da string do job no node numa lista.
+	l_line = line.split()
+	node_raw = l_line[0][6:]
+	cpu_raw = l_line[1][8:]
+	mem = int(l_line[2][4:])
+
+	if node_raw[5] == '[':
+		l_node = make_interval(node_raw[6:-1])
+	else:
+		l_node = [int(node_raw[5:])]
+	
+	l_cpu = make_interval(cpu_raw)
+	
+	l_cpu_node = []
+	for n in l_node:
+		l_cpu_node += [[n, l_cpu, mem]]
+
+	return l_cpu_node
+
+
+
+
+def get_job_info(lines, l0):
+	# Obtencao da informacao do job
+	user_id_line = lines[l0+1].split()[0]
+	i0 = user_id_line.find("(")
+	user_id = user_id_line[7:i0]
+	l_jobs = []
+
+	i0=l0+17
+	while True:
+		if lines[i0][5:10] == "Nodes":
+			l_cpu_node = get_node_info(lines[i0])
+			for n in l_cpu_node:
+				l_jobs += [ [user_id] + n ]
+			i0 += 1
+		else:
+			break
+	return l_jobs
+
+
+
+
+def get_running_jobs():
+	
+	global f_some_users
+	global l_some_users
+	
+	# Obtencao da lista de jobs
+	p = subprocess.Popen(['scontrol', 'show', 'jobid', '-dd'],\
+		stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+	out, err = p.communicate()
+	lines = out.split("\n")[:-1]
+	
+	# Processamento da informacao raw
+	l_jobs = []
+	l_index = []
+	for k in range(len(lines)):
+		l = lines[k]
+		if l[0:5] != "JobId":
+			continue
+		# Determinacao do estado do job
+		status = lines[k+3][12:19]
+		if status != "RUNNING":
+			continue
+		
+		job_info = get_job_info(lines, k)
+		
+		# User filtering
+		if f_some_users:
+			if job_info[0] not in l_some_users:
+				continue
+		
+		l_jobs += job_info
+
+	return l_jobs
+
+
+
+
+def make_user_char(char, cor):
+	#prefix="\033[48;5;"
+	prefix="\033[38;5;16m\033[48;5;"
+	cor_str = str(cor)
+	suffix="\033[0;00m"
+
+	return prefix + cor_str + "m" + char
+
+
+
+
+def get_users(jobs):
+	d_users = {}
+	for j in jobs:
+		d_users[j[0]] = 1
+	users = list(d_users.keys())
+	
+	return users
+
+
+
+def my_hash1(str_in, n):
+	total=0
+	for c in str_in:
+		total += ord(c)
+	return total%n
+
+
+
+
+def my_hash2(txt, n):
+	s = sum( [ ord(k) for k in txt ] )
+	s = s**3
+	return int( str(s)[-4:-1] )%n
+
+
+
+def make_user_char_dic(users):
+	u_char = {}
+
+	for i in range(len(users)):
+		username = users[i]
+		# Cores ao calhas das 216 cores uniformemente distribuidas no RGB
+		# Sacrifiquei as primeira 72 cores (as mais azuladas)
+		color = my_hash1(users[i], 144) + 88
+		u_initial = users[i][0]
+		u_char[username] = make_user_char(u_initial, color)
+
+	return u_char
+
+
+
+
+# Filters the blade info where the input jobs are active
+def filter_blades(jobs, blades_info):
+	d_blades = {}
+	for j in jobs:
+		d_blades[j[1]] = 1
+	
+	new_blades_info = []
+	for b in blades_info:
+		if b not in d_blades:
+			continue
+		new_blades_info.append(b)
+	
+	return new_blades_info
+
+
+
+
+def print_blades_ocupation(blades_info, jobs, u_chars):
+	global n_cols_term
+	global char0
+	global char_out
+	global max_name_len
+	global max_cpus
+	global max_mem
+	global disp_buff
+
+	N = len(blades_info)
+	
+	# Quantidade de memoria por bloco
+	dm = max_mem/n_cols_mem_max
+
+	blades = []
+	blades_mem = []
+
+	# Arranque dos vectores
+	for i in range(N):
+		n_cpus_blade = blades_info[i][1]
+		blades += [ ['.']*n_cpus_blade ]
+		blades_mem += [{}]
+	
+	# Processamento de cada job
+	for j in jobs:
+		user = j[0]
+		uc = u_chars[user]
+		# a numeracao das blades comeca em 1
+		i_blade = int(j[1]) - 1
+		
+		# Ocupacao dos cpus da blade
+		for c in j[2]:
+			if (blades[i_blade][c] != '.'):
+				print i_blade,c,"- core ja ocupado"
+			blades[i_blade][c] = uc
+
+		# Ocupacao da memoria da blade
+		if user not in blades_mem[i_blade]:
+			blades_mem[i_blade][user] = j[3]
+		else:
+			blades_mem[i_blade][user] += j[3]
+
+	# Adicao dos cores no estado 'other'
+	for i in range(N):
+		if not blades_info[i][2]:
+			continue
+		n_cpus_out = blades_info[i][2]
+		for k in range(len(blades[i])):
+			if blades[i][k]!='.':
+				continue
+
+			blades[i][k] = 'o'
+
+			n_cpus_out -= 1
+			if n_cpus_out == 0:
+				break
+			
+
+		
+	# Construccao de cada linha e print 
+	for i in range(N):
+		n_cpus_blade = blades_info[i][1]
+		str_blade_tmp = ""
+		for c in blades[i]:
+			if c=='.':
+				str_blade_tmp += char0 + "."
+			elif c=='o':
+				str_blade_tmp += char0 + char_out
+			else:
+				str_blade_tmp += c
+		str_blade_tmp += char0
+		
+		# Cpus
+		gap = " "*(3 + max_cpus - n_cpus_blade)
+		name = " " + blades_info[i][0].ljust(max_name_len + 2)
+
+		# Memoria
+		n_blocos_ocupados = 0
+		mem_str = ""
+		frac_mem = float(blades_info[i][3])/float(max_mem)
+		n_cols_mem_blade = int(frac_mem  * n_cols_mem_max)
+		for user in blades_mem[i]:
+			mem = blades_mem[i][user]
+			n_blocos = int(mem/dm)
+			n_blocos_ocupados += n_blocos
+			uc = u_chars[user]
+			mem_str += uc*n_blocos
+		free_blocks = n_cols_mem_blade - n_blocos_ocupados
+		mem_str += char0 + '.'*free_blocks
+		
+		# Composicao final
+		blade_str = name + str_blade_tmp + gap + mem_str
+		disp_buff += blade_str + "\n"
+
+
+
+
+def print_users_legend(users, u_chars):
+	global n_cols_term
+	global char0
+	global disp_buff
+	
+	# Folga minima entre nomes dos users (ignorando o simbolo)
+	folga = 4
+
+	N = len(users)
+	len_users = [len(u) for u in users]
+	# Primeira hipotese
+	n_cols = n_cols_term//(max(len_users)+folga)
+	
+	# Numero de linhas
+	extra_line = 1 if N%n_cols else 0
+	n_lines = N//n_cols + extra_line
+
+	# Agora vai-se minimizar o numero de linhas ate rebentar a soma das
+	# colunas rebentar 'n_cols_term'
+	line_big = 0
+	while True:
+		
+		# A primeira hipotese de n_lines nao e necessaria avaliar,
+		# portanto passa-se logo para a proxima hipotese, menos 1 linha.
+		n_lines -= 1
+
+		if n_lines == 0:
+			break
+		
+		extra_col = 1 if N%n_lines else 0
+		n_cols = N//n_lines + extra_col
+
+		# Teste da ocupacao das colunas
+		# Em principio o teste inicial nao e preciso
+		# Quando rebentar, fica-se com o numero de colunas anterior.
+		n_cols_ocupadas = 0
+		for i in range(n_cols):
+			i0 = i*n_lines
+			i1 = (i+1)*n_lines
+			n_cols_ocupadas += max( len_users[i0:i1] ) + folga
+		
+		if n_cols_ocupadas > n_cols_term:
+			break
+	
+	# O numero de linhas e' o anterior (antes de rebentar a verificacao)
+	n_lines += 1
+	
+	# Resto da divisao dos users pelo numero de linhas
+	rem_lines = N%n_lines
+
+	# Re-calculo das colunas
+	extra_col = 1 if rem_lines else 0
+	n_cols = N//n_lines + extra_col
+
+	# Largura do maior user de cada coluna
+	max_user_len_col = [0]*n_cols
+	for i in range(n_cols):
+		i0 = i*n_lines
+		i1 = (i+1)*n_lines
+		max_user_len_col[i] = max( len_users[i0:i1] )
+
+	# Construccao das primeiras linhas
+	lines = ['']*n_lines
+	for i in range(n_cols-1):
+		offset = i*n_lines
+		for j in range(n_lines):
+			k = offset + j
+			u_char = u_chars[users[k]] + char0
+			str_user = users[k].ljust(max_user_len_col[i])
+			lines[j] += " " + u_char  + " " + str_user + " "
+	
+	# Construccao da ultima coluna
+	n_last_lines = rem_lines if rem_lines else n_lines
+	offset = (n_cols-1)*n_lines
+	for j in range(n_last_lines):
+		k = offset + j
+		u_char = u_chars[users[k]] + char0
+		lines[j] += " " + u_char + " " + users[k] + " "
+		
+	# Print final dos users
+	for j in range(n_lines):
+		disp_buff += lines[j] + "\n"
+
+
+
+
+################################################################################
+################################################################################
+
+# Flag e lista para mostrar alguns users
+global f_some_users
+global l_some_users
+f_some_users = False
+l_some_users = []
+
+parse_argv()
+
+exit(2)
+
+
+# Caracteristicas do terminal
+global n_cols_term
+global n_cols_mem_max
+n_cols_term = get_term_width()
+
+# Caracter da formatacao default
+global char0
+char0 = "\033[0;00m"
+# Caracter do cpu out
+global char_out
+char_out = u"\u2592"
+
+# Tamanho maximo de um nome de uma blade
+global max_name_len
+# Numero maximo de cpus por blade
+global max_cpus
+# Tamanho maximo de memoria de uma blade
+global max_mem
+
+
+
+
+# Info das blades
+# Formatacao: [name, cpus_total, cpus_other, mem_total, mem_alloc]
+blades_info = get_blades_info()
+
+
+
+
+# Acerto da largura do terminal.
+# Quero que no minimo a memoria tenha 4 chars, mas que no maximo o display tenha
+# 80 chars.
+# Calculo do numero de colunas disponivel para a memoria
+n_cols_base = max_name_len + 3 + max_cpus + 4
+n_cols_mem_max = n_cols_term - n_cols_base
+if n_cols_mem_max < 4:
+	n_cols_term = n_cols_base + 4
+if n_cols_term > 80:
+	n_cols_term = 80
+# Recalculo baseada na nova largura do display
+n_cols_mem_max = n_cols_term - n_cols_base
+
+
+
+
+# Info dos jobs
+# Formatacao: [user, blade, processador, memoria]
+jobs = get_running_jobs()
+
+# Dicionario dos characteres de cada user
+# Decidi usar uma hash para determinar a cor de cada user.
+users = get_users(jobs)
+u_chars = make_user_char_dic(users)
+
+
+
+# Quando temos uma lista de users, filtram-se as blades
+if f_some_users:
+	blades_info = filter_blades(jobs, blades_info)
+
+
+
+# Buffer do display
+global disp_buff
+disp_buff = ""
+
+# Print do header
+disp_buff += " "*(max_name_len+3) + "CPU" + " "*max_cpus + "MEM\n"
+
+# Print das blades
+print_blades_ocupation(blades_info, jobs, u_chars)
+
+disp_buff += "\n"
+
+# Print dos users
+print_users_legend(users, u_chars)
+
+print disp_buff
