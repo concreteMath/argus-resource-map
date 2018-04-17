@@ -13,6 +13,7 @@
 
 
 
+
 import sys
 import subprocess
 
@@ -129,8 +130,8 @@ def get_blades_info():
 		if bl_total_mem > max_mem:
 			max_mem = bl_total_mem
 
-		blades_info += [[bl_name, bl_total_cpus, bl_other_cpus, bl_total_mem,\
-			bl_alloc_mem]]
+		blades_info += [[bl_name, bl_total_cpus, bl_other_cpus,\
+		                 bl_total_mem, bl_alloc_mem]]
 
 	return blades_info
 
@@ -155,8 +156,8 @@ def make_interval(txt):
 
 
 
+# Transformacao da string do job no node numa lista.
 def get_node_info(line):
-	# Transformacao da string do job no node numa lista.
 	l_line = line.split()
 	node_raw = l_line[0][6:]
 	cpu_raw = l_line[1][8:]
@@ -317,9 +318,12 @@ def print_blades_ocupation(blades_info, jobs, u_chars):
 	global disp_buff
 
 	N = len(blades_info)
-
-	# Blades activas
-	active_blades = [False]*N
+	
+	blades_index = {}
+	# Dicionario dos indices das blades
+	for k, blade in enumerate(blades_index):
+		i_blade = int(blade[0][5])
+		blades_index[i_blade] = k
 
 	# Quantidade de memoria por bloco
 	dm = max_mem/n_cols_mem_max
@@ -337,11 +341,8 @@ def print_blades_ocupation(blades_info, jobs, u_chars):
 	for j in jobs:
 		user = j[0]
 		uc = u_chars[user]
-		# a numeracao das blades comeca em 1
-		i_blade = int(j[1]) - 1
+		i_blade = blades_index[j[1]]
 
-		active_blades[i_blade] = True
-		
 		# Ocupacao dos cpus da blade
 		for c in j[2]:
 			if (blades[i_blade][c] != '.'):
@@ -374,11 +375,6 @@ def print_blades_ocupation(blades_info, jobs, u_chars):
 	# Construccao de cada linha e print 
 	for i in range(N):
 		
-		# Caso se esteja a filtrar os users, censuram-se as blades que
-		# nao tenham jobs activos
-		if f_some_users and (not active_blades[i]):
-			continue
-
 		n_cpus_blade = blades_info[i][1]
 		str_blade_tmp = ""
 		for c in blades[i]:
@@ -561,7 +557,8 @@ n_cols_mem_max = n_cols_term - n_cols_base
 
 
 # Info dos jobs
-# Formatacao: [user, blade, processador, memoria]
+# Formatacao: [user, i_blade, processador, memoria]
+# i_blade é dado pelo número no nome da blade (ex:argus6)
 jobs = get_running_jobs()
 
 if len(jobs) == 0:
@@ -574,21 +571,25 @@ users = get_users(jobs)
 u_chars = make_user_char_dic(users)
 
 
+# If the user names are specified by option '-u', only blades with jobs from
+# those users will be presented
+if f_some_users:
+	blades_info = filter_blades(jobs, blades_info)
 
 
-# Buffer do display
+# Display buffer
 global disp_buff
 disp_buff = ""
 
-# Print do header
+# Print - header
 disp_buff += " "*(max_name_len+3) + "CPU" + " "*max_cpus + "MEM\n"
 
-# Print das blades
+# Print - blades
 print_blades_ocupation(blades_info, jobs, u_chars)
 
 disp_buff += "\n"
 
-# Print dos users
+# Print - users
 print_users_legend(users, u_chars)
 
 print disp_buff
