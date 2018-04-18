@@ -322,7 +322,7 @@ def print_blades_ocupation(blades_info, jobs, u_chars):
 	blades_index = {}
 	# Dicionario dos indices das blades
 	for k, blade in enumerate(blades_index):
-		i_blade = int(blade[0][5])
+		i_blade = int(blade[0][5:])
 		blades_index[i_blade] = k
 
 	# Quantidade de memoria por bloco
