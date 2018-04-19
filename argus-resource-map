@@ -3,9 +3,9 @@
 # ARGUS resource allocation map.
 
 # Made by Diamantino Silva
-# 2017-04-18
+# 2017-04-19
 
-# Version 1.1.2
+# Version 1.1.3
 # Whats new:
 # - '-u' option to only show some users
 # - Fixed get_users(), using a dictionary instead of a list
@@ -294,6 +294,7 @@ def make_user_char_dic(users):
 
 
 # Filters the blade info where the input jobs are active
+# The blade number in 'blades_info' is the number in the name (ex: argus6)
 def filter_blades(jobs, blades_info):
 	d_blades = {}
 	for j in jobs:
@@ -301,10 +302,11 @@ def filter_blades(jobs, blades_info):
 	
 	
 	new_blades_info = []
-	for i in range(len(blades_info)):
-		if i not in d_blades:
+	for blade in blades_info:
+		i_blade = int(blade[0][5:])
+		if i_blade not in d_blades:
 			continue
-		new_blades_info.append(blades_info[i])
+		new_blades_info.append(blade)
 	
 	return new_blades_info
 
@@ -324,9 +326,10 @@ def print_blades_ocupation(blades_info, jobs, u_chars):
 	
 	# Blade index dictionary
 	blades_index = {}
-	for k, blade in enumerate(blades_index):
+	for k, blade in enumerate(blades_info):
 		i_blade = int(blade[0][5:])
 		blades_index[i_blade] = k
+
 
 	# Amount of memory per block
 	dm = max_mem/n_cols_mem_max
@@ -339,6 +342,7 @@ def print_blades_ocupation(blades_info, jobs, u_chars):
 		n_cpus_blade = blades_info[i][1]
 		blades += [ ['.']*n_cpus_blade ]
 		blades_mem += [{}]
+	
 	
 	# Job by job processing
 	for j in jobs:
@@ -568,6 +572,7 @@ jobs = get_running_jobs()
 if len(jobs) == 0:
 	print("ERROR: no jobs found")
 	exit(2)
+
 
 # Character dictionary for each user.
 # I have a hash to obtain each user's color.
