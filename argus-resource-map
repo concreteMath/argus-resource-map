@@ -24,7 +24,7 @@ import subprocess
 def print_usage():
 	print
 	print "usage:"
-	print sys.argv[0], "[-u user0, user1, ...]"
+	print sys.argv[0], "[-u user0 user1 ...]"
 	print
 
 
