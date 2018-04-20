@@ -10,4 +10,5 @@ Dependencies:
 ```
 python
 slurm
+stty
 ```
